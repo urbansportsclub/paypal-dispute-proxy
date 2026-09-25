@@ -11,7 +11,7 @@ on:
 jobs:
   deploy:
     if: ${{ github.event.label.name == 'deploy' || github.ref == 'refs/heads/main' }}
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, dind]
     name: Deploy
     steps:
       - name: Checkout

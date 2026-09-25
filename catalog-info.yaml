@@ -1,0 +1,17 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: paypal-dispute-proxy
+  description: Proxy worker to handle PayPal multipart/form-data dispute evidence uploads
+  annotations:
+    urbansportsclub.com/project-type: nodejs
+    github.com/project-slug: urbansportsclub/paypal-dispute-proxy
+    backstage.io/kubernetes-id: paypal-dispute-proxy
+  tags:
+    - paypal-proxy
+    - cloudflare-worker
+spec:
+  type: service
+  lifecycle: production
+  owner: corporate-engagement
+  system: b2b-portal

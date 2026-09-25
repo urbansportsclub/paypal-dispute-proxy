@@ -1,63 +1,59 @@
 export default {
   async fetch(request, env, ctx) {
-    // Only allow POST requests
     if (request.method !== 'POST') {
-      return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
-        status: 405,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-
-    // Check custom Bearer token stored in Cloudflare Environment Variables
-    const authHeader = request.headers.get('Authorization');
-    if (!env.PROXY_AUTH_TOKEN || authHeader !== `Bearer ${env.PROXY_AUTH_TOKEN}`) {
-      return new Response(JSON.stringify({ error: 'Unauthorized: Invalid or missing Bearer token' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' }
-      });
+      return new Response('Method Not Allowed', { status: 405 });
     }
 
     try {
-      const paypalAccessToken = request.headers.get('X-PayPal-Access-Token');
-      const body = await request.json();
-      const { disputeId, fileName, base64File, evidenceType, notes } = body;
-      if (!paypalAccessToken || !disputeId || !base64File) {
-        return new Response(JSON.stringify({ error: 'Missing required fields (X-PayPal-Access-Token header, disputeId, base64File)' }), {
+      // Get access token from request header
+      const accessToken = request.headers.get('x-paypal-access-token');
+
+      if (!accessToken) {
+        return new Response(JSON.stringify({ error: 'Missing x-paypal-access-token header' }), {
           status: 400,
           headers: { 'Content-Type': 'application/json' }
         });
       }
 
-      // Convert Base64 to Binary ArrayBuffer
+      // Read remaining parameters from JSON body
+      const body = await request.json();
+      const { disputeId, fileName, base64File, evidenceType, notes } = body;
+
+      if (!disputeId || !fileName || !base64File || !evidenceType) {
+        return new Response(JSON.stringify({ error: 'Missing required body fields' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+
+      // Decode base64 string back to binary buffer
       const binaryString = atob(base64File);
       const bytes = new Uint8Array(binaryString.length);
       for (let i = 0; i < binaryString.length; i++) {
         bytes[i] = binaryString.charCodeAt(i);
       }
-      const pdfBlob = new Blob([bytes], { type: 'application/pdf' });
 
-      // Build Multipart Form
+      // Build multipart/form-data payload for PayPal
       const formData = new FormData();
-      
-      const metadata = {
-        evidences: [
-          {
-            evidence_type: evidenceType || 'PROOF_OF_FULFILLMENT',
-            notes: notes || 'Uploaded supporting evidence.'
-          }
-        ]
+
+      const metaData = {
+        evidence_type: evidenceType,
+        notes: notes || ''
       };
 
-      // Add input JSON part
-      const metadataBlob = new Blob([JSON.stringify(metadata)], { type: 'application/json' });
-      formData.append('input', metadataBlob);
+      formData.append(
+        'input',
+        new Blob([JSON.stringify(metaData)], { type: 'application/json' })
+      );
 
-      // Add file part
-      formData.append('evidence-file', pdfBlob, fileName || 'evidence.pdf');
+      formData.append(
+        'file',
+        new Blob([bytes], { type: 'application/pdf' }),
+        fileName
+      );
 
-      // Send to PayPal
-      const paypalUrl = `https://api-m.sandbox.paypal.com/v1/customer/disputes/${disputeId}/provide-evidence`;
-      
+      // Forward to PayPal Dispute API
+      const paypalUrl = `https://api-m.paypal.com/v1/customer/disputes/${disputeId}/provide-evidence`;
       const paypalResponse = await fetch(paypalUrl, {
         method: 'POST',
         headers: {
@@ -70,7 +66,9 @@ export default {
 
       return new Response(responseData, {
         status: paypalResponse.status,
-        headers: { 'Content-Type': 'application/json' }
+        headers: {
+          'Content-Type': 'application/json'
+        }
       });
 
     } catch (error) {

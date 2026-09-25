@@ -1,57 +1,83 @@
-const functions = require('@google-cloud/functions-framework');
-const FormData = require('form-data');
-const axios = require('axios');
-
-const PROXY_AUTH_TOKEN = process.env.PROXY_AUTH_TOKEN;
-
-functions.http('submitPaypalEvidence', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  if (!PROXY_AUTH_TOKEN || !authHeader || authHeader !== `Bearer ${PROXY_AUTH_TOKEN}`) {
-    return res.status(401).json({ error: 'Unauthorized: Invalid or missing Bearer token' });
-  }
-
-  try {
-    const { accessToken, disputeId, fileName, base64File, evidenceType, notes } = req.body;
-
-    if (!accessToken || !disputeId || !base64File) {
-      return res.status(400).json({ error: 'Missing required fields (accessToken, disputeId, base64File)' });
+export default {
+  async fetch(request, env, ctx) {
+    // Only allow POST requests
+    if (request.method !== 'POST') {
+      return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
+        status: 405,
+        headers: { 'Content-Type': 'application/json' }
+      });
     }
 
-    const fileBuffer = Buffer.from(base64File, 'base64');
-    const form = new FormData();
+    // Check custom Bearer token stored in Cloudflare Environment Variables
+    const authHeader = request.headers.get('Authorization');
+    if (!env.PROXY_AUTH_TOKEN || authHeader !== `Bearer ${env.PROXY_AUTH_TOKEN}`) {
+      return new Response(JSON.stringify({ error: 'Unauthorized: Invalid or missing Bearer token' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
 
-    const metadata = {
-      evidences: [
-        {
-          evidence_type: evidenceType || 'PROOF_OF_FULFILLMENT',
-          notes: notes || 'Uploaded supporting evidence.'
-        }
-      ]
-    };
+    try {
+      const body = await request.json();
+      const { accessToken, disputeId, fileName, base64File, evidenceType, notes } = body;
 
-    form.append('input', JSON.stringify(metadata), {
-      contentType: 'application/json'
-    });
-
-    form.append('evidence-file', fileBuffer, {
-      filename: fileName || 'evidence.pdf',
-      contentType: 'application/pdf'
-    });
-
-    const paypalUrl = `https://api-m.sandbox.paypal.com/v1/customer/disputes/${disputeId}/provide-evidence`;
-    
-    const response = await axios.post(paypalUrl, form, {
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        ...form.getHeaders()
+      if (!accessToken || !disputeId || !base64File) {
+        return new Response(JSON.stringify({ error: 'Missing required fields (accessToken, disputeId, base64File)' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        });
       }
-    });
 
-    return res.status(response.status).json(response.data);
+      // Convert Base64 to Binary ArrayBuffer
+      const binaryString = atob(base64File);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      const pdfBlob = new Blob([bytes], { type: 'application/pdf' });
 
-  } catch (error) {
-    const status = error.response?.status || 500;
-    const data = error.response?.data || { error: error.message };
-    return res.status(status).json(data);
+      // Build Multipart Form
+      const formData = new FormData();
+      
+      const metadata = {
+        evidences: [
+          {
+            evidence_type: evidenceType || 'PROOF_OF_FULFILLMENT',
+            notes: notes || 'Uploaded supporting evidence.'
+          }
+        ]
+      };
+
+      // Add input JSON part
+      const metadataBlob = new Blob([JSON.stringify(metadata)], { type: 'application/json' });
+      formData.append('input', metadataBlob);
+
+      // Add file part
+      formData.append('evidence-file', pdfBlob, fileName || 'evidence.pdf');
+
+      // Send to PayPal
+      const paypalUrl = `https://api-m.sandbox.paypal.com/v1/customer/disputes/${disputeId}/provide-evidence`;
+      
+      const paypalResponse = await fetch(paypalUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: formData
+      });
+
+      const responseData = await paypalResponse.text();
+
+      return new Response(responseData, {
+        status: paypalResponse.status,
+        headers: { 'Content-Type': 'application/json' }
+      });
+
+    } catch (error) {
+      return new Response(JSON.stringify({ error: error.message }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
   }
-});
+};

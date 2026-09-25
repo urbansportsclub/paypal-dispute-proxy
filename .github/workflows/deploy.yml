@@ -4,9 +4,13 @@ on:
   push:
     branches:
       - main
+  pull_request:
+    types:
+      - labeled
 
 jobs:
   deploy:
+    if: ${{ github.event.label.name == 'deploy' || github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     name: Deploy
     steps:

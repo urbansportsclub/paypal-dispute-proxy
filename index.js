@@ -18,11 +18,11 @@ export default {
     }
 
     try {
+      const paypalAccessToken = request.headers.get('X-PayPal-Access-Token');
       const body = await request.json();
-      const { accessToken, disputeId, fileName, base64File, evidenceType, notes } = body;
-
-      if (!accessToken || !disputeId || !base64File) {
-        return new Response(JSON.stringify({ error: 'Missing required fields (accessToken, disputeId, base64File)' }), {
+      const { disputeId, fileName, base64File, evidenceType, notes } = body;
+      if (!paypalAccessToken || !disputeId || !base64File) {
+        return new Response(JSON.stringify({ error: 'Missing required fields (X-PayPal-Access-Token header, disputeId, base64File)' }), {
           status: 400,
           headers: { 'Content-Type': 'application/json' }
         });
@@ -61,7 +61,7 @@ export default {
       const paypalResponse = await fetch(paypalUrl, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${accessToken}`
+          'Authorization': `Bearer ${paypalAccessToken}`
         },
         body: formData
       });
